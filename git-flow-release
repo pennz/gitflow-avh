@@ -42,7 +42,7 @@
 # Called when the base of the release is the $DEVELOP_BRANCH
 #
 _finish_from_develop() {
-	local opts merge_branch commit keepmsg remotebranchdeleted localbranchdeleted compare_refs_result merge_result
+	local opts merge_branch commit keepmsg remotebranchdeleted localbranchdeleted compare_refs_result merge_result full_tag
 
 	remotebranchdeleted=$FLAGS_FALSE
 	localbranchdeleted=$FLAGS_FALSE
@@ -98,6 +98,82 @@ _finish_from_develop() {
 	fi
 
 	run_pre_hook "$VERSION_PREFIX$TAGNAME" "$ORIGIN" "$BRANCH"
+
+    if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+        # Try to sync remote PIE branch
+        if git_remote_branch_exists "$ORIGIN/$PIE_BRANCH"; then
+            if flag ff_master; then
+                git_compare_refs "$PIE_BRANCH" "$ORIGIN/$PIE_BRANCH"
+                compare_refs_result=$?
+
+                if [ $compare_refs_result -gt 0 ]; then
+                    warn "Branches '"$PIE_BRANCH"' and '"$ORIGIN/$PIE_BRANCH"' have diverged."
+                    if [ $compare_refs_result -eq 1 ]; then
+                        warn "Fast forwarding '"$PIE_BRANCH"'."
+                        git_do checkout "$PIE_BRANCH" || die "Could not check out branch '$PIE_BRANCH'."
+                        git_do merge  --ff-only "$ORIGIN/$PIE_BRANCH" >/dev/null 2>&1
+                        merge_result=$?
+                        git_do checkout "$BRANCH"
+                        if [ $merge_result -gt 0 ]; then
+                            die "'"$PIE_BRANCH"' can not be fast forwarded."
+                        fi
+                    elif [ $compare_refs_result -eq 2 ]; then
+                        # Warn here, since there is no harm in being ahead
+                        warn "And local branch '$1' is ahead of '$2'."
+                    else
+                        die "Branches need merging first."
+                    fi
+                fi
+            else
+                require_branches_equal "$PIE_BRANCH" "$ORIGIN/$PIE_BRANCH"
+            fi
+        fi
+		# Try to merge into pie.
+		# In case a previous attempt to finish this release branch has failed,
+		# but the merge into master was successful, we skip it now
+		if ! git_is_branch_merged_into "$BRANCH" "$PIE_BRANCH"; then
+				git_do checkout "$PIE_BRANCH" || die "Could not check out branch '$PIE_BRANCH'."
+
+				opts=""
+				noflag edit && opts="$opts --no-edit"
+				if noflag squash; then
+					git_do merge --no-ff $opts "$BRANCH" || die "There were merge conflicts." # TODO: What do we do now?
+				else
+					git_do merge --squash $opts "$BRANCH" || die "There were merge conflicts." # TODO: What do we do now?
+					flag squash_info && gitflow_create_squash_message "Merged release branch '$BRANCH'" "$PIE_BRANCH" "$BRANCH" > "$DOT_GIT_DIR/SQUASH_MSG"
+					git_do commit $opts
+				fi
+		fi
+
+		if noflag notag; then
+			# Try to tag the release.
+			# In case a previous attempt to finish this release branch has failed,
+			# but the tag was set successful, we skip it now
+			full_tag="${VERSION_PREFIX}_PIE_$TAGNAME"
+			if ! git_tag_exists "${full_tag}"; then
+				git_do checkout "$PIE_BRANCH" || die "Could not check out branch '$PIE_BRANCH'."
+				if [ "$FLAGS_message" != "" ] && [ "$FLAGS_messagefile" != "" ]; then
+					die "Use either -m,--message or -f,--messagefile. Can not use both options at the same time"
+				fi
+				opts="-a"
+				flag sign && opts="$opts -s"
+				[ "$FLAGS_signingkey" != "" ] && opts="$opts -u '$FLAGS_signingkey'"
+				if [ "$FLAGS_message" != "" ]; then
+					# Run filter on the tag message
+					FLAGS_message=$(run_filter_hook release-finish-tag-message "${FLAGS_message}" "${full_tag}")
+					opts="$opts -m '$FLAGS_message'"
+				fi
+				[ "$FLAGS_messagefile" != "" ] && opts="$opts -F '$FLAGS_messagefile'"
+				if noflag edit; then
+					if [ "$FLAGS_message" = "" ] && [ "$FLAGS_messagefile" = "" ]; then
+						# in order to fix annotated tag without message
+						opts="$opts -m ${full_tag}"
+					fi
+				fi
+				eval git_do tag $opts "${full_tag}" || die "Tagging failed. Please run finish again to retry."
+			fi
+		fi
+    fi
 
 	# Try to merge into master.
 	# In case a previous attempt to finish this release branch has failed,
@@ -235,6 +311,11 @@ _finish_from_develop() {
 	if flag fetch; then
 		echo "- Latest objects have been fetched from '$ORIGIN'"
 	fi
+
+    if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+	    echo "- Release branch '$BRANCH' has been merged into '$PIE_BRANCH'"
+    fi
+
 	echo "- Release branch '$BRANCH' has been merged into '$MASTER_BRANCH'"
 	if noflag notag; then
 		echo "- The release was tagged '$VERSION_PREFIX$TAGNAME'"
@@ -263,7 +344,11 @@ _finish_from_develop() {
 	echo "- Release branch '$BRANCH' "$keepmsg
 
 	if flag push; then
-		echo "- '$DEVELOP_BRANCH', '$MASTER_BRANCH' and tags have been pushed to '$ORIGIN'"
+        if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+		    echo "- '$DEVELOP_BRANCH', '$MASTER_BRANCH' , '$PIE_BRANCH' and tags have been pushed to '$ORIGIN'"
+        else
+		    echo "- '$DEVELOP_BRANCH', '$MASTER_BRANCH' and tags have been pushed to '$ORIGIN'"
+        fi
 	fi
 	echo "- You are now on branch '$(git_current_branch)'"
 	echo
@@ -561,6 +646,7 @@ v,verbose!           Verbose (more) output
 
 	# Define flags
 	DEFINE_boolean 'fetch' false "fetch from $ORIGIN before performing finish" F
+	DEFINE_boolean 'ceip2pie' false "finish release pie, and merge back"
 
 	# Override defaults with values from config
 	gitflow_override_flag_boolean   "release.start.fetch"   "fetch"
@@ -569,7 +655,7 @@ v,verbose!           Verbose (more) output
 	parse_args "$@"
 	eval set -- "${FLAGS_ARGV}"
 	base=${2:-$DEVELOP_BRANCH}
-
+    
 	# Run filter on the version
 	VERSION=$(run_filter_hook release-start-version $VERSION)
 	if [ $? -eq 127 ]; then
@@ -578,6 +664,11 @@ v,verbose!           Verbose (more) output
 
 	# As VERSION might have changed reset BRANCH with new VERSION
 	BRANCH=$PREFIX$VERSION
+
+    if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+	    base=${2:-$MASTER_BRANCH}
+	    BRANCH="${PREFIX}ceip2pie_${VERSION}"
+    fi
 
 	require_base_is_local_branch "$base"
 	gitflow_require_version_arg
@@ -670,6 +761,7 @@ nodevelopmerge!  Don't back-merge develop branch
 	DEFINE_boolean 'edit' true "accept the auto-generated message on merging" e
 	DEFINE_string  'tagname' "" "use the given tag name" T
 	DEFINE_boolean 'nodevelopmerge' false "don't merge $BRANCH into $DEVELOP_BRANCH "
+	DEFINE_boolean 'ceip2pie' false "finish release pie, and merge back"
 
 	# Override defaults with values from config
 	gitflow_override_flag_boolean   "release.finish.fetch"          "fetch"
@@ -753,7 +845,7 @@ nodevelopmerge!  Don't back-merge develop branch
 			git_fetch_branch "$ORIGIN" "$BRANCH"
 	fi
 
-	if [ "$BASE_BRANCH" = "$DEVELOP_BRANCH" ]; then
+	if [ "$BASE_BRANCH" = "$DEVELOP_BRANCH" -o ${FLAGS_ceip2pie} -eq ${FLAGS_TRUE} ]; then
 		_finish_from_develop
 	else
 		_finish_base
