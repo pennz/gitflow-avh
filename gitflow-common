@@ -276,6 +276,13 @@ git_fetch_branch() {
 #
 
 # Function used to check if the repository is git-flow enabled.
+gitflow_has_pie_configured() {
+	local pie
+
+	pie=$(git config --get gitflow.branch.pie)
+	[ "$pie" != "" ] && git_local_branch_exists "$pie"
+}
+
 gitflow_has_master_configured() {
 	local master
 

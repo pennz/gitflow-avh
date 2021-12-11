@@ -142,6 +142,65 @@ file=    use given config file
 	fi
 
 	# Add a master branch if no such branch exists yet
+	if gitflow_has_pie_configured && ! flag force; then
+		pie_branch=$(git config --get gitflow.branch.pie)
+	else
+		# Two cases are distinguished:
+		# 1. A fresh git repo (without any branches)
+		#    We will create a new pie/develop branch for the user
+		# 2. Some branches do already exist
+		#    We will disallow creation of new pie/develop branches and
+		#    rather allow to use existing branches for git-flow.
+		branch_count=$(git_local_branches | wc -l)
+		if [ "$branch_count" -eq 0 ]; then
+			echo "No branches exist yet. Base branches must be created now."
+			should_check_existence=NO
+			default_suggestion=$(git config --get gitflow.branch.pie || echo pie)
+		else
+			echo
+			echo "Which branch should be used for bringing forth production releases?"
+			git_local_branches | sed 's/^.*$/   - &/g'
+
+			should_check_existence=YES
+			default_suggestion=
+			for guess in $(git config --get gitflow.branch.pie) 'int/pie' 'pie'; do
+				if git_local_branch_exists "$guess"; then
+					default_suggestion="$guess"
+					break
+				fi
+			done
+
+		fi
+
+		if [ -z $default_suggestion ] && flag defaults; then
+				should_check_existence=YES
+				default_suggestion=$(git config --get gitflow.branch.pie || echo pie)
+		fi
+
+		printf "Branch name for PIE releases: [$default_suggestion] "
+		if noflag defaults; then
+			read answer
+		else
+			printf "\n"
+		fi
+		pie_branch=${answer:-$default_suggestion}
+
+		# Check existence in case of an already existing repo
+		if [ "$should_check_existence" = "YES" ]; then
+			# If no local branch exists and a remote branch of the same
+			# name exists, checkout that branch and use it for pie
+			if ! git_local_branch_exists "$pie_branch" && git_remote_branch_exists "origin/$pie_branch"; then
+				git_do branch "$pie_branch" "origin/$pie_branch" >/dev/null 2>&1
+			elif ! git_local_branch_exists "$pie_branch"; then
+				die "Local branch '$pie_branch' does not exist."
+			fi
+		fi
+
+		# Store the name of the pie branch
+		git_do config $gitflow_config_option gitflow.branch.pie "$pie_branch"
+	fi
+
+	# Add a master branch if no such branch exists yet
 
 	if gitflow_has_master_configured && ! flag force; then
 		master_branch=$(git config --get gitflow.branch.master)

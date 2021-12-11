@@ -107,6 +107,9 @@ file=     Use given config file
 	# Parse arguments
 	parse_args "$@"
 
+	output=$(git config $gitflow_config_option --get gitflow.branch.pie)
+	echo "Branch name for PIE releases: $output "
+
 	output=$(git config $gitflow_config_option --get gitflow.branch.master)
 	echo "Branch name for production releases: $output "
 
@@ -158,6 +161,10 @@ file=     Use given config file
 	value=$2
 
 	case $OPTION in
+	pie)
+		cfg_option="gitflow.branch.pie"
+		txt="Branch name for PIE releases"
+		;;
 	master)
 		cfg_option="gitflow.branch.master"
 		txt="Branch name for production releases"
@@ -200,6 +207,24 @@ file=     Use given config file
 	esac
 
 	[ -n "$value" ] || die_help "No value given"
+
+	if [ $OPTION = "pie" ]; then
+		develop_branch=$(git config --get gitflow.branch.develop)
+		master_branch=$(git config --get gitflow.branch.master)
+
+		if [ "$value" = $develop_branch ]; then
+			die "PIE and \"next release\" branch should differ."
+		fi
+		if [ "$value" = $master_branch ]; then
+			die "Production and PIE branch should differ."
+		fi
+
+		if ! git_local_branch_exists "$value" && git_remote_branch_exists "origin/$value"; then
+			git_do branch "$value" "origin/$value" >/dev/null 2>&1
+		elif ! git_local_branch_exists "$value"; then
+			die "Local branch '$value' does not exist."
+		fi
+	fi
 
 	if [ $OPTION = "master" ]; then
 		develop_branch=$(git config --get gitflow.branch.develop)
