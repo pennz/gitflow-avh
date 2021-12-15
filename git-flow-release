@@ -42,13 +42,16 @@
 # Called when the base of the release is the $DEVELOP_BRANCH
 #
 _finish_from_develop() {
-	local opts merge_branch commit keepmsg remotebranchdeleted localbranchdeleted compare_refs_result merge_result full_tag
+	local opts merge_branch commit keepmsg remotebranchdeleted localbranchdeleted compare_refs_result merge_result full_pie_tag_name full_tag_name
 
 	remotebranchdeleted=$FLAGS_FALSE
 	localbranchdeleted=$FLAGS_FALSE
 
 	# Update local branches with remote branches
 	if flag fetch; then
+        if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+            git_fetch_branch "$ORIGIN" "$PIE_BRANCH"
+        fi
 		git_fetch_branch "$ORIGIN" "$MASTER_BRANCH"
 		git_fetch_branch "$ORIGIN" "$DEVELOP_BRANCH"
 	fi
@@ -57,6 +60,7 @@ _finish_from_develop() {
 	if git_remote_branch_exists "$ORIGIN/$BRANCH"; then
 		require_branches_equal "$BRANCH" "$ORIGIN/$BRANCH"
 	fi
+    # Sync master branch
 	if git_remote_branch_exists "$ORIGIN/$MASTER_BRANCH"; then
 		if flag ff_master; then
 			git_compare_refs "$MASTER_BRANCH" "$ORIGIN/$MASTER_BRANCH"
@@ -88,17 +92,19 @@ _finish_from_develop() {
 		require_branches_equal "$DEVELOP_BRANCH" "$ORIGIN/$DEVELOP_BRANCH"
 	fi
 
+    full_tag_name="$VERSION_PREFIX$TAGNAME"
 	if noflag notag; then
 		# We ask for a tag, be sure it does not exists or
 		# points to the latest hotfix commit
-		if git_tag_exists "$VERSION_PREFIX$TAGNAME"; then
-			git_compare_refs  "$BRANCH" "$VERSION_PREFIX$TAGNAME"^2 2>/dev/null
+		if git_tag_exists "${full_tag_name}"; then
+			git_compare_refs  "$BRANCH" "${full_tag_name}"^2 2>/dev/null
 			[ $? -eq 0 ] || die "Tag already exists and does not point to release branch '$BRANCH'"
 		fi
 	fi
 
-	run_pre_hook "$VERSION_PREFIX$TAGNAME" "$ORIGIN" "$BRANCH"
+	run_pre_hook "${full_tag_name}" "$ORIGIN" "$BRANCH"
 
+    # Try to merge to PIE branch
     if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
         # Try to sync remote PIE branch
         if git_remote_branch_exists "$ORIGIN/$PIE_BRANCH"; then
@@ -149,8 +155,8 @@ _finish_from_develop() {
 			# Try to tag the release.
 			# In case a previous attempt to finish this release branch has failed,
 			# but the tag was set successful, we skip it now
-			full_tag="${VERSION_PREFIX}_PIE_$TAGNAME"
-			if ! git_tag_exists "${full_tag}"; then
+			full_pie_tag_name="${VERSION_PREFIX}PIE_$TAGNAME"
+			if ! git_tag_exists "${full_pie_tag_name}"; then
 				git_do checkout "$PIE_BRANCH" || die "Could not check out branch '$PIE_BRANCH'."
 				if [ "$FLAGS_message" != "" ] && [ "$FLAGS_messagefile" != "" ]; then
 					die "Use either -m,--message or -f,--messagefile. Can not use both options at the same time"
@@ -160,17 +166,17 @@ _finish_from_develop() {
 				[ "$FLAGS_signingkey" != "" ] && opts="$opts -u '$FLAGS_signingkey'"
 				if [ "$FLAGS_message" != "" ]; then
 					# Run filter on the tag message
-					FLAGS_message=$(run_filter_hook release-finish-tag-message "${FLAGS_message}" "${full_tag}")
+					FLAGS_message=$(run_filter_hook release-finish-tag-message "${FLAGS_message}" "${full_pie_tag_name}")
 					opts="$opts -m '$FLAGS_message'"
 				fi
 				[ "$FLAGS_messagefile" != "" ] && opts="$opts -F '$FLAGS_messagefile'"
 				if noflag edit; then
 					if [ "$FLAGS_message" = "" ] && [ "$FLAGS_messagefile" = "" ]; then
 						# in order to fix annotated tag without message
-						opts="$opts -m ${full_tag}"
+						opts="$opts -m ${full_pie_tag_name}"
 					fi
 				fi
-				eval git_do tag $opts "${full_tag}" || die "Tagging failed. Please run finish again to retry."
+				eval git_do tag $opts "${full_pie_tag_name}" || die "Tagging failed. Please run finish again to retry."
 			fi
 		fi
     fi
@@ -192,11 +198,14 @@ _finish_from_develop() {
 			fi
 	fi
 
+    if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+        full_tag_name="${VERSION_PREFIX}cEIP_$TAGNAME"
+    fi
 	if noflag notag; then
 		# Try to tag the release.
 		# In case a previous attempt to finish this release branch has failed,
 		# but the tag was set successful, we skip it now
-		if ! git_tag_exists "$VERSION_PREFIX$TAGNAME"; then
+		if ! git_tag_exists "${full_tag_name}"; then
 			git_do checkout "$MASTER_BRANCH" || die "Could not check out branch '$MASTER_BRANCH'."
 			if [ "$FLAGS_message" != "" ] && [ "$FLAGS_messagefile" != "" ]; then
 				die "Use either -m,--message or -f,--messagefile. Can not use both options at the same time"
@@ -206,17 +215,17 @@ _finish_from_develop() {
 			[ "$FLAGS_signingkey" != "" ] && opts="$opts -u '$FLAGS_signingkey'"
 			if [ "$FLAGS_message" != "" ]; then
 				# Run filter on the tag message
-				FLAGS_message=$(run_filter_hook release-finish-tag-message "${FLAGS_message}" "$VERSION_PREFIX$TAGNAME")
+				FLAGS_message=$(run_filter_hook release-finish-tag-message "${FLAGS_message}" "${full_tag_name}")
 				opts="$opts -m '$FLAGS_message'"
 			fi
 			[ "$FLAGS_messagefile" != "" ] && opts="$opts -F '$FLAGS_messagefile'"
 			if noflag edit; then
 				if [ "$FLAGS_message" = "" ] && [ "$FLAGS_messagefile" = "" ]; then
 					# in order to fix annotated tag without message
-					opts="$opts -m $VERSION_PREFIX$TAGNAME"
+					opts="$opts -m ${full_tag_name}"
 				fi
 			fi
-			eval git_do tag $opts "$VERSION_PREFIX$TAGNAME" || die "Tagging failed. Please run finish again to retry."
+			eval git_do tag $opts "${full_tag_name}" || die "Tagging failed. Please run finish again to retry."
 		fi
 	fi
 
@@ -241,7 +250,7 @@ _finish_from_develop() {
 				# Accounting for 'git describe', if a release is tagged
 				# we use the tag commit instead of the branch.
 				if noflag notag; then
-					commit="$VERSION_PREFIX$TAGNAME"
+					commit="${full_tag_name}"
 				else
 					commit="$MASTER_BRANCH"
 				fi
@@ -259,7 +268,7 @@ _finish_from_develop() {
 		fi
 	fi
 
-	run_post_hook "$VERSION_PREFIX$TAGNAME" "$ORIGIN" "$BRANCH"
+	run_post_hook "${full_tag_name}" "$ORIGIN" "$BRANCH"
 
 	if flag push; then
 		if flag pushdevelop; then
@@ -315,13 +324,18 @@ _finish_from_develop() {
     if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
 	    echo "- Release branch '$BRANCH' has been merged into '$PIE_BRANCH'"
     fi
-
 	echo "- Release branch '$BRANCH' has been merged into '$MASTER_BRANCH'"
+
 	if noflag notag; then
-		echo "- The release was tagged '$VERSION_PREFIX$TAGNAME'"
+        if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+		    echo "- The release was tagged '${full_pie_tag_name}' for PIE branch"
+		    echo "- The release was tagged '${full_tag_name}' for cEIP branch"
+        else
+		    echo "- The release was tagged '${full_tag_name}'"
+        fi
 	fi
 	[ "$commit" = "$MASTER_BRANCH" ] && echo "- Master branch '$MASTER_BRANCH' has been back-merged into '$DEVELOP_BRANCH'"
-	[ "$commit" = "$VERSION_PREFIX$TAGNAME" ] && echo "- Release tag '$VERSION_PREFIX$TAGNAME' has been back-merged into '$DEVELOP_BRANCH'"
+	[ "$commit" = "${full_tag_name}" ] && echo "- Release tag '${full_tag_name}' has been back-merged into '$DEVELOP_BRANCH'"
 	[ "$commit" = "$BRANCH" ] && echo "- Release branch '$BRANCH' has been merged into '$DEVELOP_BRANCH'"
 
 	if noflag keep; then
@@ -655,7 +669,7 @@ v,verbose!           Verbose (more) output
 	parse_args "$@"
 	eval set -- "${FLAGS_ARGV}"
 	base=${2:-$DEVELOP_BRANCH}
-    
+
 	# Run filter on the version
 	VERSION=$(run_filter_hook release-start-version $VERSION)
 	if [ $? -eq 127 ]; then
@@ -664,11 +678,6 @@ v,verbose!           Verbose (more) output
 
 	# As VERSION might have changed reset BRANCH with new VERSION
 	BRANCH=$PREFIX$VERSION
-
-    if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
-	    base=${2:-$MASTER_BRANCH}
-	    BRANCH="${PREFIX}ceip2pie_${VERSION}"
-    fi
 
 	require_base_is_local_branch "$base"
 	gitflow_require_version_arg
@@ -845,7 +854,7 @@ nodevelopmerge!  Don't back-merge develop branch
 			git_fetch_branch "$ORIGIN" "$BRANCH"
 	fi
 
-	if [ "$BASE_BRANCH" = "$DEVELOP_BRANCH" -o ${FLAGS_ceip2pie} -eq ${FLAGS_TRUE} ]; then
+	if [ "$BASE_BRANCH" = "$DEVELOP_BRANCH" ]; then
 		_finish_from_develop
 	else
 		_finish_base
