@@ -104,7 +104,6 @@ _finish_from_develop() {
 
 	run_pre_hook "${full_tag_name}" "$ORIGIN" "$BRANCH"
 
-    # Try to merge to PIE branch
     if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
         # Try to sync remote PIE branch
         if git_remote_branch_exists "$ORIGIN/$PIE_BRANCH"; then
@@ -134,18 +133,18 @@ _finish_from_develop() {
                 require_branches_equal "$PIE_BRANCH" "$ORIGIN/$PIE_BRANCH"
             fi
         fi
-		# Try to merge into pie.
+        # Try to merge to PIE branch
 		# In case a previous attempt to finish this release branch has failed,
 		# but the merge into master was successful, we skip it now
 		if ! git_is_branch_merged_into "$BRANCH" "$PIE_BRANCH"; then
-				git_do checkout "$PIE_BRANCH" || die "Could not check out branch '$PIE_BRANCH'."
+				git_do checkout "$PIE_BRANCH" || recover "Could not check out branch '$PIE_BRANCH'." && git_do checkout "$PIE_BRANCH" || die "Could not check out branch '$PIE_BRANCH'." 
 
 				opts=""
 				noflag edit && opts="$opts --no-edit"
 				if noflag squash; then
-					git_do merge --no-ff $opts "$BRANCH" || die "There were merge conflicts." # TODO: What do we do now?
+					git_do merge --no-ff $opts "$BRANCH" || recover "There were merge conflicts." && git_do merge --no-ff $opts "$BRANCH" || die "There were merge conflicts."
 				else
-					git_do merge --squash $opts "$BRANCH" || die "There were merge conflicts." # TODO: What do we do now?
+					git_do merge --squash $opts "$BRANCH" || recover "There were merge conflicts." && git_do merge --squash $opts "$BRANCH" || die "There were merge conflicts."
 					flag squash_info && gitflow_create_squash_message "Merged release branch '$BRANCH'" "$PIE_BRANCH" "$BRANCH" > "$DOT_GIT_DIR/SQUASH_MSG"
 					git_do commit $opts
 				fi
