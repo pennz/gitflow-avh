@@ -142,9 +142,9 @@ _finish_from_develop() {
 				opts=""
 				noflag edit && opts="$opts --no-edit"
 				if noflag squash; then
-					git_do merge --no-ff $opts "$BRANCH" || recover "There were merge conflicts." && git_do merge --no-ff $opts "$BRANCH" || die "There were merge conflicts."
+					git_do merge --no-ff $opts "$BRANCH" ||  recover "There were merge conflicts. Try fix and finish this failed command:\ngit merge --no-ff $opts \"$BRANCH\""
 				else
-					git_do merge --squash $opts "$BRANCH" || recover "There were merge conflicts." && git_do merge --squash $opts "$BRANCH" || die "There were merge conflicts."
+					git_do merge --squash $opts "$BRANCH" || recover "There were merge conflicts. Try fix and finish this failed command:\ngit merge --squash $opts \"$BRANCH\""
 					flag squash_info && gitflow_create_squash_message "Merged release branch '$BRANCH'" "$PIE_BRANCH" "$BRANCH" > "$DOT_GIT_DIR/SQUASH_MSG"
 					git_do commit $opts
 				fi
@@ -176,6 +176,8 @@ _finish_from_develop() {
 					fi
 				fi
 				eval git_do tag $opts "${full_pie_tag_name}" || die "Tagging failed. Please run finish again to retry."
+			else
+				recover "${full_pie_tag_name} already exists.\n\n\nPlease check in subshell, if OK, exit the subshell normal, otherwise, use\"exit 1\" to stop this git flow release finish."
 			fi
 		fi
     fi
@@ -197,9 +199,9 @@ _finish_from_develop() {
 			fi
 	fi
 
-    if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
-        full_tag_name="${VERSION_PREFIX}cEIP_$TAGNAME"
-    fi
+	if [ ${FLAGS_ceip2pie} -eq $FLAGS_TRUE ]; then
+		full_tag_name="${VERSION_PREFIX}cEIP_$TAGNAME"
+	fi
 	if noflag notag; then
 		# Try to tag the release.
 		# In case a previous attempt to finish this release branch has failed,
@@ -225,6 +227,8 @@ _finish_from_develop() {
 				fi
 			fi
 			eval git_do tag $opts "${full_tag_name}" || die "Tagging failed. Please run finish again to retry."
+		else
+			recover "${full_tag_name} already exists.\n\nPay attention to the mergeback, as dev branch will try to merge back tagged commit, which might not be the release branch being finished now.\nPlease check in subshell, if OK, exit the subshell normal, otherwise, use \"exit 1\" to stop this git flow release finish."
 		fi
 	fi
 

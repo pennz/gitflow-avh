@@ -43,9 +43,10 @@
 
 # Shell output
 warn() { echo "$@" >&2; }
+warn_e() { echo -e "$@" >&2; }
 die() { warn "Fatal: $@"; exit 1; }
 recover() {
-    warn "Fatal: $@";
+    warn_e "Fatal: $@";
     warn "Now you can try to fix the problem in sub-shell then return to the normal logic.";
     if [ x"${SHELL}" != x ]; then ${SHELL}; else sh; fi
     if [ $? -ne 0 ]; then exit $?; fi
